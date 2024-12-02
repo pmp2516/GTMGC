@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
-CUDA_VISIBLE_DEVICES='1' \
+CUDA_VISIBLE_DEVICES=0 \
     python \
     -m experiments.conformer_prediction.gtmgc_for_conformer_prediction \
-    --tokenized_dataset_path=/lab/Xgk/DataSets/Tokenized_HFMolecule3D_VocabSize_512/random \
-    --output_dir=./results/conformer_prediction/GTMGC_Molecule3D_Random \
+    --tokenized_dataset_path=tokenized/Tokenized_HFMolecule3D_VocabSize_512/random/ \
+    --output_dir=./results/conformer_prediction/GTMGC_revised_2_Molecule3D_Random \
     --run_name=GTMGC_Molecule3D_Random \
     --resume_from_checkpoint=False \
     --overwrite_output_dir=True \

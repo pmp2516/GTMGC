@@ -15,13 +15,17 @@ from transformers import PretrainedConfig, PreTrainedModel
 
 
 class GTMGCBlock(nn.Module):
-    def __init__(self, config: PretrainedConfig = None, encoder: bool = True) -> None:
+    def __init__(self, config: PretrainedConfig = None, encoder: bool = True, revised: bool = False) -> None:
         super().__init__()
         self.config = config
         self.encoder = encoder
         assert config is not None, f"config must be specified to build {self.__class__.__name__}"
-        self.use_A_in_attn = getattr(config, "encoder_use_A_in_attn", False) if encoder else getattr(config, "decoder_use_A_in_attn", False)
-        self.use_D_in_attn = getattr(config, "encoder_use_D_in_attn", False) if encoder else getattr(config, "decoder_use_D_in_attn", False)
+        if revised:
+            self.use_A_in_attn = True
+            self.use_D_in_attn = True
+        else:
+            self.use_A_in_attn = getattr(config, "encoder_use_A_in_attn", False) if encoder else getattr(config, "decoder_use_A_in_attn", False)
+            self.use_D_in_attn = getattr(config, "encoder_use_D_in_attn", False) if encoder else getattr(config, "decoder_use_D_in_attn", False)
         self.multi_attention = MultiHeadAttention(
             d_q=getattr(config, "d_q", 256),
             d_k=getattr(config, "d_k", 256),
@@ -179,6 +183,67 @@ class GTMGCForConformerPrediction(GTMGCPretrainedModel):
             conformer_hat=outputs["conformer_hat"],
             # attentions={**encoder_attn_weight_dict, **decoder_attn_weight_dict}
         )
+
+class GTMGCForConformerPredictionRevised(GTMGCPretrainedModel):
+    def __init__(self, config: PretrainedConfig, *inputs, **kwargs):
+        super().__init__(config, *inputs, **kwargs)
+        assert config is not None, f"config must be specified to build {self.__class__.__name__}"
+        self.embed_style = getattr(config, "embed_style", "atom_tokenized_ids")
+        if self.embed_style == "atom_tokenized_ids":
+            self.node_embedding = nn.Embedding(getattr(config, "atom_vocab_size", 513), getattr(config, "d_embed", 256), padding_idx=0)
+        elif self.embed_style == "atom_type_ids":
+            self.node_embedding = nn.Embedding(getattr(config, "atom_vocab_size", 119), getattr(config, "d_embed", 256), padding_idx=0)
+        elif self.embed_style == "ogb":
+            self.node_embedding = NodeEmbedding(atom_embedding_dim=getattr(config, "d_embed", 256), attr_reduction="sum")
+        else:
+            raise ValueError(f"Invalid embed style: {self.embed_style}")
+        self.conformer_head = ConformerPredictionHead(hidden_X_dim=getattr(config, "d_model", 256))
+        self.gtmgc_blocks = nn.ModuleList([GTMGCBlock(config, revised=True) for _ in range(getattr(config, "n_revised_layers", 12))])
+        self.__init_weights__()
+
+    def forward(self, **inputs):
+        conformer, node_mask = inputs.get("conformer"), inputs.get("node_mask")
+        if self.embed_style == "atom_tokenized_ids":
+            node_input_ids = inputs.get("node_input_ids")
+            node_embedding = self.node_embedding(node_input_ids)
+        elif self.embed_style == "atom_type_ids":
+            node_input_ids = inputs.get("node_type")
+            node_embedding = self.node_embedding(node_input_ids)
+        elif self.embed_style == "ogb":
+            node_embedding = self.node_embedding(inputs["node_attr"])
+        else:
+            # Should never happen; we already checked this in `__init__`
+            raise ValueError(f"Invalid embed style: {self.embed_style}")
+        losses = []
+        for i, block in enumerate(self.gtmgc_blocks):
+            conformer_out = self.conformer_head(conformer=conformer, hidden_X=node_embedding, padding_mask=node_mask, compute_loss=True)
+            loss_conformer, conformer_prediction = conformer_out["loss"], conformer_out["conformer_hat"]
+            losses.append(loss_conformer)
+            D_approx, D_M = torch.cdist(conformer_prediction, conformer_prediction), make_cdist_mask(node_mask)
+            D_approx = compute_distance_residual_bias(cdist=D_approx, cdist_mask=D_M)  # masked and row-max subtracted distance matrix
+            lap = inputs.get("lap_eigenvectors")
+            # laplacian positional encoding added embedding
+            node_embedding[:, :, : lap.shape[-1]] = node_embedding[:, :, : lap.shape[-1]] + lap
+            inputs['node_embedding'] = node_embedding
+            inputs['distance'] = D_approx
+            block_out = block(**inputs)
+            node_embedding = block_out['out']
+        # One more for final prediction
+        outputs = self.conformer_head(conformer=conformer, hidden_X=node_embedding, padding_mask=node_mask, compute_loss=True)  # final prediction
+        losses.append(outputs["loss"])
+        return ConformerPredictionOutput(
+            loss=losses[-1],
+            cdist_mae=outputs["cdist_mae"],
+            cdist_mse=outputs["cdist_mse"],
+            coord_rmsd=outputs["coord_rmsd"],
+            conformer=outputs["conformer"],
+            conformer_hat=outputs["conformer_hat"],
+        )
+
+            
+        
+
+
 
 
 class GTMGCForGraphRegression(GTMGCPretrainedModel):

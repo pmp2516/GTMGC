@@ -17,6 +17,7 @@ from pprint import pprint, pformat
 from rdkit.Chem import rdchem, rdMolAlign
 from rdkit.Chem.rdmolfiles import SDMolSupplier
 
+from models.gtmgc.modeling_gtmgc import GTMGCForConformerPredictionRevised
 from molecule3d.utils import mol_to_graph_dict
 from models.gtmgc import GTMGCCollator, GTMGCForConformerPrediction
 from models.gnn import GNNCollator, GNNForConformerPrediction
@@ -236,7 +237,7 @@ if __name__ == "__main__":
     parse.add_argument("--split", type=str, default="test", choices=["valid", "test"], help="The split of Molecule3D.")
     parse.add_argument("--seed", type=int, default=42, help="The random seed.")
     parse.add_argument("--log_file", type=str, default="./evaluate.txt", help="The log file to save the evaluation results.")
-    parse.add_argument("--method", type=str, default="GTMGC", choices=["Rdkit-DG", "Rdkit-ETKDG", "GTMGC", "GNN", "GPS"], help="The method to be evaluated.")
+    parse.add_argument("--method", type=str, default="GTMGC", choices=["Rdkit-DG", "Rdkit-ETKDG", "GTMGC", "GNN", "GPS", "GTMGC_Revised"], help="The method to be evaluated.")
     parse.add_argument("--removeHs", type=lambda x: str(x).lower() == "true", default="true", help="Whether to remove Hs.")
     parse.add_argument(
         "--GTMGC_checkpoint", type=str, default="./checkpoints/CP/GTMGC_Molecule3D_Random", help="The checkpoint of GTMGC."
@@ -281,6 +282,24 @@ if __name__ == "__main__":
         tokenizer = MoleBERTTokenizer.from_pretrained(args["MoleBERT_Tokenizer_checkpoint"]).to(device)
         print(tokenizer.config)
         GTMGC = GTMGCForConformerPrediction.from_pretrained(args["GTMGC_checkpoint"]).to(device)
+        print(GTMGC.config)
+        metrics = evaluate_gtmgc(
+            GTMGC=GTMGC,
+            tokenizer=tokenizer,
+            GTMGC_collator=GTMGC_collator,
+            tokenizer_collator=tokenizer_collator,
+            supplier=supplier,
+            device=device,
+            batch_size=args["batch_size"],
+            removeHs=args["removeHs"],
+        )
+    elif args["method"] == "GTMGC_Revised":
+        device = torch.device(args["device"])
+        tokenizer_collator = MoleBERTTokenizerCollator()
+        GTMGC_collator = GTMGCCollator()
+        tokenizer = MoleBERTTokenizer.from_pretrained(args["MoleBERT_Tokenizer_checkpoint"]).to(device)
+        print(tokenizer.config)
+        GTMGC = GTMGCForConformerPredictionRevised.from_pretrained(args["GTMGC_checkpoint"]).to(device)
         print(GTMGC.config)
         metrics = evaluate_gtmgc(
             GTMGC=GTMGC,

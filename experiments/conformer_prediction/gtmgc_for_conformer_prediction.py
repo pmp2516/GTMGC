@@ -14,6 +14,7 @@ from transformers import HfArgumentParser
 from transformers.trainer_utils import get_last_checkpoint
 
 from models import GTMGCConfig, GTMGCForConformerPrediction, GTMGCCollator
+from models.gtmgc.modeling_gtmgc import GTMGCForConformerPredictionRevised
 
 warnings.simplefilter("ignore", UserWarning)
 
@@ -75,7 +76,7 @@ def main():
         ffn_drop=0.00,
         d_ffn=1024,
     )
-    model = GTMGCForConformerPrediction(config)
+    model = GTMGCForConformerPredictionRevised(config)
     # model = GTMGCForConformerPrediction.from_pretrained('./checkpoints/Conformer_Prediction/GTMGC_Molecule3D_Random')
     print(model.config)
 
