@@ -75,6 +75,7 @@ def main():
         norm_drop=0.00,
         ffn_drop=0.00,
         d_ffn=1024,
+        share_weights = True
     )
     model = GTMGCForConformerPredictionRevised(config)
     # model = GTMGCForConformerPrediction.from_pretrained('./checkpoints/Conformer_Prediction/GTMGC_Molecule3D_Random')

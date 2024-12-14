@@ -12,6 +12,7 @@ from ..modules import MultiHeadAttention, AddNorm, PositionWiseFFN, Residual
 from ..modules.utils import make_cdist_mask, compute_distance_residual_bias
 from ..modules import AtomEmbedding, NodeEmbedding  # for Ogb embedding ablation
 from transformers import PretrainedConfig, PreTrainedModel
+from itertools import repeat
 
 
 class GTMGCBlock(nn.Module):
@@ -198,7 +199,12 @@ class GTMGCForConformerPredictionRevised(GTMGCPretrainedModel):
         else:
             raise ValueError(f"Invalid embed style: {self.embed_style}")
         self.conformer_head = ConformerPredictionHead(hidden_X_dim=getattr(config, "d_model", 256))
-        self.gtmgc_blocks = nn.ModuleList([GTMGCBlock(config, revised=True) for _ in range(getattr(config, "n_revised_layers", 12))])
+        self.num_blocks = getattr(config, "n_revised_layers", 12)
+        self.share_weights = getattr(config, "share_weights", False)
+        if self.share_weights:
+            self.gtmgc_blocks = GTMGCBlock(config, revised=True)
+        else:
+            self.gtmgc_blocks = nn.ModuleList([GTMGCBlock(config, revised=True) for _ in range(self.num_blocks)])
         self.__init_weights__()
 
     def forward(self, **inputs):
@@ -215,7 +221,8 @@ class GTMGCForConformerPredictionRevised(GTMGCPretrainedModel):
             # Should never happen; we already checked this in `__init__`
             raise ValueError(f"Invalid embed style: {self.embed_style}")
         losses = []
-        for i, block in enumerate(self.gtmgc_blocks):
+        block_iter = zip(range(self.num_blocks), repeat(self.gtmgc_blocks) if self.share_weights else enumerate(self.gtmgc_blocks))
+        for i, block in block_iter:
             conformer_out = self.conformer_head(conformer=conformer, hidden_X=node_embedding, padding_mask=node_mask, compute_loss=True)
             loss_conformer, conformer_prediction = conformer_out["loss"], conformer_out["conformer_hat"]
             losses.append(loss_conformer)
